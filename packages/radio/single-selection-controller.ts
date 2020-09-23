@@ -84,10 +84,6 @@ export type CheckableElement = HTMLElement&{
  *     this.selectionController!.unregister(this);
  *     this.selectionController = null;
  *   }
- *
- *   focus() {
- *     // focus native radio element
- *   }
  * }
  * ```
  */
@@ -212,6 +208,8 @@ export class SingleSelectionController {
    *
    * @param element Element from which selection set is derived and subsequently
    *     focused.
+   * @deprecated Set appropriate tabindex to <input> element based on checked
+   *     status instead.
    */
   focus(element: CheckableElement) {
     // Only manage focus state when using keyboard
@@ -224,6 +222,21 @@ export class SingleSelectionController {
     if (currentFocusedSet != set && set.selected && set.selected != element) {
       set.selected.focus();
     }
+  }
+
+  /**
+   * @return Returns true if atleast one radio is selected in the radio group.
+   */
+  isAnySelected(element: CheckableElement): boolean {
+    const set = this.getSet(element.name);
+
+    for (const e of set.set) {
+      if (e.checked) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**

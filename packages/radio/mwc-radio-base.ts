@@ -64,15 +64,18 @@ export class RadioBase extends FormElement {
    */
   set checked(isChecked: boolean) {
     const oldValue = this._checked;
-    if (!!isChecked === !!oldValue) {
+    if (isChecked === oldValue) {
       return;
     }
     this._checked = isChecked;
     if (this.formElement) {
       this.formElement.checked = isChecked;
     }
-    if (this._selectionController !== undefined) {
-      this._selectionController.update(this);
+    this.updateSelection();
+
+    // If programatically toggled hide the ripple.
+    if (isChecked === false) {
+      this.blur();
     }
     this.requestUpdate('checked', oldValue);
 
@@ -115,6 +118,8 @@ export class RadioBase extends FormElement {
 
   private _selectionController?: SingleSelectionController;
 
+  @internalProperty() protected formElementTabIndex = 0;
+
   @internalProperty() protected shouldRenderRipple = false;
 
   @queryAsync('mwc-ripple') ripple!: Promise<Ripple|null>;
@@ -149,18 +154,18 @@ export class RadioBase extends FormElement {
     // radio's shadow root. For example, if we're stamping in a lit-html map
     // or repeat, then we'll be constructed before we're added to a root node.
     //
-    // Also note if we aren't using native shadow DOM, then we don't technically
-    // need a SelectionController, because our inputs will share document-scoped
-    // native selection groups. However, it simplifies implementation and
-    // testing to use one in all cases. In particular, it means we correctly
-    // manage groups before the first update stamps the native input.
+    // Also note if we aren't using native shadow DOM, we still need a
+    // SelectionController, because we should update checked status of other
+    // radios in the group when selection changes. It also simplifies
+    // implementation and testing to use one in all cases.
     //
     // eslint-disable-next-line @typescript-eslint/no-use-before-define
     this._selectionController = SingleSelectionController.getController(this);
     this._selectionController.register(this);
-    // With native <input type="radio">, when a checked radio is added to the
-    // root, then it wins. Immediately update to emulate this behavior.
-    this._selectionController.update(this);
+
+    // Radios maybe checked before connected, update selection as soon it is
+    // connected to DOM. Last checked radio button in the DOM will be selected.
+    this.updateSelection();
   }
 
   disconnectedCallback() {
@@ -172,11 +177,11 @@ export class RadioBase extends FormElement {
   }
 
   focus() {
-    this.focusNative();
+    this.formElement?.focus();
   }
 
-  focusNative() {
-    this.formElement.focus();
+  blur() {
+    this.formElement?.blur();
   }
 
   protected createAdapter(): MDCRadioAdapter {
@@ -189,20 +194,48 @@ export class RadioBase extends FormElement {
   }
 
   private handleFocus() {
-    if (this._selectionController !== undefined) {
-      this._selectionController.focus(this);
-      this.handleRippleFocus();
-    }
+    this.handleRippleFocus();
   }
 
   private handleClick() {
     // Firefox has weird behavior with radios if they are not focused
-    this.formElement.focus();
+    this.focus();
   }
 
   private handleBlur() {
-    this.formElement.blur();
-    this.handleRippleBlur();
+    this.blur();
+    this.rippleHandlers.endFocus();
+  }
+
+  /**
+   * @return Returns tabindex based on checked status of input. Only checked
+   *     input receives tab focus. If none of radios are checked then set tab
+   *     focus to all input to let browser decide which radio to receive focus
+   *     in the group.
+   */
+  private getTabIndex(): number {
+    // If none of the radio buttons are checked in group include all radios in
+    // tab navigation. This'll let browser decide where to land the focus.
+    // By default browser lands focus on the leading radio based on keyboard tab
+    // direction.
+    if (!this._selectionController?.isAnySelected(this)) {
+      return 0;
+    }
+
+    // When tabbing through land focus on the checked radio in the group.
+    if (this.checked) {
+      return 0;
+    }
+
+    return -1;
+  }
+
+  private updateSelection() {
+    if (this._selectionController) {
+      this._selectionController.update(this);
+    }
+
+    this.formElementTabIndex = this.getTabIndex();
   }
 
   /**
@@ -220,6 +253,7 @@ export class RadioBase extends FormElement {
     return html`
       <div class="mdc-radio ${classMap(classes)}">
         <input
+          tabindex="${this.formElementTabIndex}"
           class="mdc-radio__native-control"
           type="radio"
           name="${this.name}"
@@ -242,16 +276,6 @@ export class RadioBase extends FormElement {
         </div>
         ${this.renderRipple()}
       </div>`;
-  }
-
-  protected firstUpdated() {
-    super.firstUpdated();
-    // We might not have been able to synchronize this from the checked setter
-    // earlier, if checked was set before the input was stamped.
-    this.formElement.checked = this.checked;
-    if (this._selectionController !== undefined) {
-      this._selectionController.update(this);
-    }
   }
 
   protected handleRippleMouseDown(event: Event) {
@@ -284,10 +308,6 @@ export class RadioBase extends FormElement {
 
   protected handleRippleFocus() {
     this.rippleHandlers.startFocus();
-  }
-
-  protected handleRippleBlur() {
-    this.rippleHandlers.endFocus();
   }
 
   protected changeHandler() {
